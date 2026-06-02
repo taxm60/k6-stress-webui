@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WAF 防禦能力驗證平台</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 客製化滾動條 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #1e1e2e; }
+        ::-webkit-scrollbar-thumb { background: #45475a; border-radius: 3px; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+
+    <div class="container mx-auto px-4 py-8 max-w-5xl">
+        
+        <header class="mb-8 text-center md:text-left flex flex-col md:flex-row justify-between items-center border-b border-slate-800 pb-6">
+            <div>
+                <h1 class="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-red-500 to-amber-500 bg-clip-text text-transparent">
+                    WAF DDoS 壓力測試控制台
+                </h1>
+                <p class="text-slate-400 mt-2 text-sm">透過模擬短期密集 DoS 攻擊，驗證 WAF 事件補捉與防禦機制</p>
+            </div>
+            <div class="mt-4 md:mt-0">
+                <span class="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                    <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Ubuntu 環境正常
+                </span>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <div class="bg-slate-800/50 backdrop-blur-md p-6 rounded-2xl border border-slate-700/50 shadow-xl flex flex-col justify-between">
+                <div>
+                    <h2 class="text-xl font-bold mb-4 flex items-center gap-2">
+                        <span>⚙️</span> 控制面板
+                    </h2>
+                    <div class="space-y-4 text-sm text-slate-300">
+                        <div class="p-3 bg-slate-900/50 rounded-lg border border-slate-700">
+                            <span class="text-slate-400 block mb-1">測試目標：</span>
+                            <span class="font-mono text-amber-400 break-all">https://www.kctax.gov.tw/...</span>
+                        </div>
+                        <div class="p-3 bg-slate-900/50 rounded-lg border border-slate-700">
+                            <span class="text-slate-400 block mb-1">測試排程 (Stages)：</span>
+                            <ul class="list-disc list-inside space-y-1 font-mono text-xs text-slate-300">
+                                <li>0s -> 10s: 升壓至 100 VUs</li>
+                                <li>10s -> 15s: 狂暴加壓至 300 VUs</li>
+                                <li>15s -> 20s: 快速降溫至 0 VUs</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-8">
+                    <button id="startBtn" class="w-full bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 active:scale-[0.98] transition-all text-white font-bold py-4 px-6 rounded-xl shadow-lg shadow-red-900/30 flex items-center justify-center gap-2 text-lg group">
+                        <svg class="w-5 h-5 fill-current group-hover:scale-110 transition-transform" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        開始執行壓測 (k6)
+                    </button>
+                </div>
+            </div>
+
+            <div class="lg:col-span-2 flex flex-col">
+                <div class="bg-slate-950 rounded-2xl border border-slate-800 shadow-2xl flex flex-col h-[500px] overflow-hidden">
+                    <div class="bg-slate-900 px-4 py-3 border-b border-slate-800 flex justify-between items-center">
+                        <div class="flex items-center gap-2">
+                            <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+                            <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                            <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+                            <span class="text-xs font-mono text-slate-400 ml-2">k6-console-output.log</span>
+                        </div>
+                        <button id="clearBtn" class="text-xs text-slate-500 hover:text-slate-300 font-mono transition-colors">Clear</button>
+                    </div>
+                    
+                    <div id="terminal" class="p-4 flex-1 overflow-y-auto font-mono text-xs md:text-sm leading-relaxed space-y-1 bg-black/40">
+                        <div class="text-slate-500">// 點擊左側「開始執行壓測」按鈕後，即時日誌將在此處輸出...</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const terminal = document.getElementById('terminal');
+
+        // 連接 WebSocket (請根據後端實際 IP 調整，若在本機測試用 localhost 即可)
+        const ws = new WebSocket(`ws://${window.location.hostname}:3001`);
+
+        ws.onopen = () => {
+            appendLog('system', '連線成功：已成功建立即時監聽管道。\n');
+        };
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            appendLog(msg.type, msg.data);
+        };
+
+        ws.onclose = () => {
+            appendLog('error', '連線斷開：與後端服務連線中斷。\n');
+        };
+
+        // 按鈕觸發事件
+        startBtn.addEventListener('click', () => {
+            // 點擊後將按鈕停用，避免重複觸發
+            startBtn.disabled = true;
+            startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            
+            ws.send('start_k6');
+        });
+
+        // 清除 Log
+        clearBtn.addEventListener('click', () => {
+            terminal.innerHTML = '<div class="text-slate-500">// 終端機已清空</div>';
+        });
+
+        // 將 Log 渲染到畫面上並自動滾動到底部
+        function appendLog(type, text) {
+            const div = document.createElement('div');
+            
+            // 根據不同的日誌類型給予不同顏色
+            if (type === 'system') {
+                div.className = 'text-cyan-400 font-bold';
+                // 當 k6 執行完畢時，恢復按鈕可用狀態
+                if (text.includes('執行完畢')) {
+                    startBtn.disabled = false;
+                    startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                }
+            } else if (type === 'error') {
+                div.className = 'text-rose-400';
+            } else {
+                div.className = 'text-emerald-400'; // k6 預設標準輸出顏色
+            }
+
+            // 處理換行
+            div.innerText = text;
+            terminal.appendChild(div);
+
+            // 自動捲動到最下方
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    </script>
+</body>
+</html>
